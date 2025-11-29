@@ -5,12 +5,12 @@
 
 # Generate Low-Rank Weights (Offline)
 python -u utils/prepare_low_rank_weight.py \
-    --model_name meta-llama/Meta-Llama-3.2-1B \
+    --model_name unsloth/Llama-3.2-1B \
     --output_dir ../low_rank_models/llama-3.2-1b
 
 # Baseline: Full evaluation
 GPU=0
-model=meta-llama/Meta-Llama-3.2-1B
+model=unsloth/Llama-3.2-1B
 for task in piqa; do
 CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation.py \
     --tasks $task \
@@ -23,7 +23,7 @@ done
 
 # # Baseline: Relufiction
 # GPU=0
-# model=meta-llama/Meta-Llama-3.2-1B
+# model=unsloth/Llama-3.2-1B
 # for task in piqa; do
 # CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation.py \
 #     --tasks $task \
@@ -35,7 +35,7 @@ done
 
 # R-Sparse
 GPU=0
-model=meta-llama/Meta-Llama-3.2-1B
+model=unsloth/Llama-3.2-1B
 for task in piqa; do
 CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation.py \
     --tasks $task \

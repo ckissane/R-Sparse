@@ -18,7 +18,7 @@ from . import quac
 from . import hellaswag
 from . import swag
 from . import openbookqa
-from . import squad
+# from . import squad
 from . import naturalqs
 from . import nqopen
 from . import sat
@@ -47,7 +47,7 @@ from . import pile
 from . import wikitext
 from . import lambada_multilingual
 from . import mutual
-from . import truthfulqa
+# from . import truthfulqa
 from . import blimp
 from . import asdiv
 from . import gsm8k
@@ -62,7 +62,7 @@ from . import xwinograd
 from . import pawsx
 from . import xnli
 from . import mgsm
-from . import scrolls
+# from . import scrolls
 from . import ceval
 from . import csatqa
 from . import haerae
@@ -149,7 +149,7 @@ TASK_REGISTRY = {
     "hellaswag": hellaswag.HellaSwag,
     "swag": swag.SWAG,
     "openbookqa": openbookqa.OpenBookQA,
-    "squad2": squad.SQuAD2,
+    # "squad2": squad.SQuAD2,
     "race": race.RACE,
     # "naturalqs": naturalqs.NaturalQs, # not implemented yet
     "nq_open": nqopen.NQOpen,
@@ -169,8 +169,8 @@ TASK_REGISTRY = {
     "ethics_utilitarianism_original": hendrycks_ethics.EthicsUtilitarianismOriginal,
     "ethics_utilitarianism": hendrycks_ethics.EthicsUtilitarianism,
     "ethics_virtue": hendrycks_ethics.EthicsVirtue,
-    "truthfulqa_mc": truthfulqa.TruthfulQAMultipleChoice,
-    "truthfulqa_gen": truthfulqa.TruthfulQAGeneration,
+    # "truthfulqa_mc": truthfulqa.TruthfulQAMultipleChoice,
+    # "truthfulqa_gen": truthfulqa.TruthfulQAGeneration,
     # dialogue
     "mutual": mutual.MuTual,
     "mutual_plus": mutual.MuTualPlus,
@@ -347,7 +347,7 @@ TASK_REGISTRY = {
     **pawsx.construct_tasks(),
     **xnli.construct_tasks(),
     **mgsm.construct_tasks(),
-    **scrolls.construct_tasks(),
+    # **scrolls.construct_tasks(),
     **ceval.create_all_tasks(),
     **cmmlu.create_all_tasks(),
 }
