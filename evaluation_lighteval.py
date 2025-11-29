@@ -21,32 +21,32 @@ class RSparseModel(LightevalModel):
     """Custom lighteval model wrapper for R-Sparse models."""
 
     def __init__(self, config, env_config=None):
-        self.model_name = config.get("model_name", "meta-llama/Meta-Llama-3-8B")
-        self.method = config.get("method", "full")
-        self.config_file = config.get("config_file", None)
-        self.sparse_config_file = config.get("sparse_config_file", None)
-        self.cache_dir = config.get("cache_dir", None)
-        self.device = config.get("device", "cuda:0")
-        self.target_sparsity = config.get("target_sparsity", 0.5)
-        self.prefill_ratio = config.get("prefill_ratio", 0.1)
-        self.sparse_ratio = config.get("sparse_ratio", 1.0)
+        self._model_name = config.get("model_name", "meta-llama/Meta-Llama-3-8B")
+        self._method = config.get("method", "full")
+        self._config_file = config.get("config_file", None)
+        self._sparse_config_file = config.get("sparse_config_file", None)
+        self._cache_dir = config.get("cache_dir", None)
+        self._device = config.get("device", "cuda:0")
+        self._target_sparsity = config.get("target_sparsity", 0.5)
+        self._prefill_ratio = config.get("prefill_ratio", 0.1)
+        self._sparse_ratio = config.get("sparse_ratio", 1.0)
 
         # Create args object for setup_model
-        self.args = argparse.Namespace(
-            model_name=self.model_name,
-            method=self.method,
-            config_file=self.config_file,
-            sparse_config_file=self.sparse_config_file,
-            cache_dir=self.cache_dir,
-            device=self.device,
-            target_sparsity=self.target_sparsity,
-            prefill_ratio=self.prefill_ratio,
-            sparse_ratio=self.sparse_ratio,
+        args = argparse.Namespace(
+            model_name=self._model_name,
+            method=self._method,
+            config_file=self._config_file,
+            sparse_config_file=self._sparse_config_file,
+            cache_dir=self._cache_dir,
+            device=self._device,
+            target_sparsity=self._target_sparsity,
+            prefill_ratio=self._prefill_ratio,
+            sparse_ratio=self._sparse_ratio,
         )
 
         # Load model using existing setup
-        self._config, self._tokenizer, self.model = setup_model(self.args)
-        self.model = self.model.eval().to(self.device)
+        self._model_config, self._tokenizer, self._model = setup_model(args)
+        self._model = self._model.eval()
 
         # Set padding token if not set
         if self._tokenizer.pad_token is None:
@@ -57,12 +57,20 @@ class RSparseModel(LightevalModel):
         return self._tokenizer
 
     @property
+    def model(self):
+        return self._model
+
+    @property
+    def device(self):
+        return self._device
+
+    @property
     def add_special_tokens(self):
         return False
 
     @property
     def max_length(self):
-        return self.model.config.max_position_embeddings
+        return self._model.config.max_position_embeddings
 
     def greedy_until(self, requests, override_bs=None):
         """Generate text until stop sequence or max tokens."""
@@ -73,11 +81,11 @@ class RSparseModel(LightevalModel):
             max_tokens = request.generation_size or 256
 
             inputs = self._tokenizer(context, return_tensors="pt", padding=True)
-            input_ids = inputs["input_ids"].to(self.device)
-            attention_mask = inputs["attention_mask"].to(self.device)
+            input_ids = inputs["input_ids"].to(self._device)
+            attention_mask = inputs["attention_mask"].to(self._device)
 
             with torch.no_grad():
-                outputs = self.model.generate(
+                outputs = self._model.generate(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     max_new_tokens=max_tokens,
@@ -116,15 +124,15 @@ class RSparseModel(LightevalModel):
             )
             full_ids = context_ids + continuation_ids
 
-            input_ids = torch.tensor([full_ids], device=self.device)
+            input_ids = torch.tensor([full_ids], device=self._device)
 
             with torch.no_grad():
-                outputs = self.model(input_ids=input_ids)
+                outputs = self._model(input_ids=input_ids)
                 logits = outputs.logits
 
             # Get log probs for continuation tokens
             shift_logits = logits[0, len(context_ids) - 1 : -1, :]
-            shift_labels = torch.tensor(continuation_ids, device=self.device)
+            shift_labels = torch.tensor(continuation_ids, device=self._device)
 
             log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
             token_log_probs = log_probs[range(len(continuation_ids)), shift_labels]
@@ -146,11 +154,11 @@ class RSparseModel(LightevalModel):
             context = request.context
 
             input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
-                self.device
+                self._device
             )
 
             with torch.no_grad():
-                outputs = self.model(input_ids=input_ids)
+                outputs = self._model(input_ids=input_ids)
                 logits = outputs.logits
 
             shift_logits = logits[0, :-1, :]
@@ -173,11 +181,11 @@ class RSparseModel(LightevalModel):
             choices = request.choices  # List of single tokens
 
             input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
-                self.device
+                self._device
             )
 
             with torch.no_grad():
-                outputs = self.model(input_ids=input_ids)
+                outputs = self._model(input_ids=input_ids)
                 logits = outputs.logits
 
             # Get logits for the last position
