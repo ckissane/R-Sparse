@@ -9,7 +9,7 @@ from typing import Optional, List, Union
 import torch
 from transformers import AutoTokenizer, AutoConfig
 
-from lighteval.models.abstract_model import LightevalModel
+from lighteval.models.abstract_model import LightevalModel, ModelInfo
 from lighteval.models.model_output import ModelResponse
 from lighteval.logging.evaluation_tracker import EvaluationTracker
 from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
@@ -71,6 +71,17 @@ class RSparseModel(LightevalModel):
     @property
     def max_length(self):
         return self._model.config.max_position_embeddings
+
+    @property
+    def model_info(self):
+        return ModelInfo(
+            model_name=self._model_name,
+            model_sha="",
+            model_dtype=str(self._model.dtype)
+            if hasattr(self._model, "dtype")
+            else "float16",
+            model_size="",
+        )
 
     def greedy_until(self, requests, override_bs=None):
         """Generate text until stop sequence or max tokens."""
