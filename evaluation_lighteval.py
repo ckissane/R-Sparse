@@ -3,26 +3,24 @@ Custom model wrapper for R-Sparse evaluation with lighteval 0.10.0
 """
 
 import argparse
-from lighteval.models.abstract_model import LightevalModel
-from lighteval.models.model_output import (
-    ModelReturn,
-    GenerateReturn,
-    LoglikelihoodReturn,
-    LoglikelihoodSingleTokenReturn,
-)
-from lighteval.logging.evaluation_tracker import EvaluationTracker
-from lighteval.models.custom.custom_model import CustomModelConfig
-from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
+from dataclasses import dataclass
+from typing import Optional, List, Union
 
 import torch
 from transformers import AutoTokenizer, AutoConfig
+
+from lighteval.models.abstract_model import LightevalModel
+from lighteval.models.model_output import ModelResponse
+from lighteval.logging.evaluation_tracker import EvaluationTracker
+from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
+
 from utils.setup import setup_model, setup_config
 
 
 class RSparseModel(LightevalModel):
     """Custom lighteval model wrapper for R-Sparse models."""
 
-    def __init__(self, config, env_config):
+    def __init__(self, config, env_config=None):
         self.model_name = config.get("model_name", "meta-llama/Meta-Llama-3-8B")
         self.method = config.get("method", "full")
         self.config_file = config.get("config_file", None)
@@ -47,20 +45,16 @@ class RSparseModel(LightevalModel):
         )
 
         # Load model using existing setup
-        self._config, self.tokenizer, self.model = setup_model(self.args)
+        self._config, self._tokenizer, self.model = setup_model(self.args)
         self.model = self.model.eval().to(self.device)
 
         # Set padding token if not set
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+        if self._tokenizer.pad_token is None:
+            self._tokenizer.pad_token = self._tokenizer.eos_token
 
     @property
     def tokenizer(self):
         return self._tokenizer
-
-    @tokenizer.setter
-    def tokenizer(self, value):
-        self._tokenizer = value
 
     @property
     def add_special_tokens(self):
@@ -78,7 +72,7 @@ class RSparseModel(LightevalModel):
             stop_sequences = request.stop_sequence
             max_tokens = request.generation_size or 256
 
-            inputs = self.tokenizer(context, return_tensors="pt", padding=True)
+            inputs = self._tokenizer(context, return_tensors="pt", padding=True)
             input_ids = inputs["input_ids"].to(self.device)
             attention_mask = inputs["attention_mask"].to(self.device)
 
@@ -88,11 +82,11 @@ class RSparseModel(LightevalModel):
                     attention_mask=attention_mask,
                     max_new_tokens=max_tokens,
                     do_sample=False,
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
+                    pad_token_id=self._tokenizer.pad_token_id,
+                    eos_token_id=self._tokenizer.eos_token_id,
                 )
 
-            generated_text = self.tokenizer.decode(
+            generated_text = self._tokenizer.decode(
                 outputs[0][input_ids.shape[1] :], skip_special_tokens=True
             )
 
@@ -104,14 +98,7 @@ class RSparseModel(LightevalModel):
                             : generated_text.index(stop_seq)
                         ]
 
-            results.append(
-                GenerateReturn(
-                    result=generated_text,
-                    logits=None,
-                    generated_tokens=[],
-                    input_tokens=[],
-                )
-            )
+            results.append(ModelResponse(generated_text=generated_text))
 
         return results
 
@@ -123,8 +110,8 @@ class RSparseModel(LightevalModel):
             continuation = request.choice
 
             # Tokenize context and continuation
-            context_ids = self.tokenizer.encode(context, add_special_tokens=False)
-            continuation_ids = self.tokenizer.encode(
+            context_ids = self._tokenizer.encode(context, add_special_tokens=False)
+            continuation_ids = self._tokenizer.encode(
                 continuation, add_special_tokens=False
             )
             full_ids = context_ids + continuation_ids
@@ -148,14 +135,7 @@ class RSparseModel(LightevalModel):
                 for i in range(len(continuation_ids))
             )
 
-            results.append(
-                LoglikelihoodReturn(
-                    result=(total_log_prob, is_greedy),
-                    input_tokens=[],
-                    generated_tokens=[],
-                    truncated=[],
-                )
-            )
+            results.append((total_log_prob, is_greedy))
 
         return results
 
@@ -165,7 +145,7 @@ class RSparseModel(LightevalModel):
         for request in requests:
             context = request.context
 
-            input_ids = self.tokenizer.encode(context, return_tensors="pt").to(
+            input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
                 self.device
             )
 
@@ -181,14 +161,7 @@ class RSparseModel(LightevalModel):
 
             total_log_prob = token_log_probs.sum().item()
 
-            results.append(
-                LoglikelihoodReturn(
-                    result=(total_log_prob, False),
-                    input_tokens=[],
-                    generated_tokens=[],
-                    truncated=[],
-                )
-            )
+            results.append((total_log_prob, False))
 
         return results
 
@@ -199,7 +172,7 @@ class RSparseModel(LightevalModel):
             context = request.context
             choices = request.choices  # List of single tokens
 
-            input_ids = self.tokenizer.encode(context, return_tensors="pt").to(
+            input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
                 self.device
             )
 
@@ -213,20 +186,13 @@ class RSparseModel(LightevalModel):
 
             choice_log_probs = []
             for choice in choices:
-                choice_id = self.tokenizer.encode(choice, add_special_tokens=False)
+                choice_id = self._tokenizer.encode(choice, add_special_tokens=False)
                 if len(choice_id) > 0:
                     choice_log_probs.append(log_probs[choice_id[0]].item())
                 else:
                     choice_log_probs.append(float("-inf"))
 
-            results.append(
-                LoglikelihoodSingleTokenReturn(
-                    result=choice_log_probs,
-                    input_tokens=[],
-                    generated_tokens=[],
-                    truncated=[],
-                )
-            )
+            results.append(choice_log_probs)
 
         return results
 
@@ -262,6 +228,21 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Create model instance directly
+    model_config = {
+        "model_name": args.model_name,
+        "method": args.method,
+        "config_file": args.config_file,
+        "sparse_config_file": args.sparse_config_file,
+        "cache_dir": args.cache_dir,
+        "device": args.device,
+        "target_sparsity": args.target_sparsity,
+        "prefill_ratio": args.prefill_ratio,
+        "sparse_ratio": args.sparse_ratio,
+    }
+
+    model = RSparseModel(model_config)
+
     # Set up evaluation tracking
     evaluation_tracker = EvaluationTracker(
         output_dir=args.output_dir, save_details=True
@@ -273,30 +254,12 @@ def main():
         override_batch_size=args.batch_size,
     )
 
-    # Configure custom model
-    model_config = CustomModelConfig(
-        model="r-sparse-custom",
-        model_definition_file_path=__file__,
-        model_class="RSparseModel",
-        model_args={
-            "model_name": args.model_name,
-            "method": args.method,
-            "config_file": args.config_file,
-            "sparse_config_file": args.sparse_config_file,
-            "cache_dir": args.cache_dir,
-            "device": args.device,
-            "target_sparsity": args.target_sparsity,
-            "prefill_ratio": args.prefill_ratio,
-            "sparse_ratio": args.sparse_ratio,
-        },
-    )
-
     # Create and run the pipeline
     pipeline = Pipeline(
         tasks=args.tasks,
         pipeline_parameters=pipeline_params,
         evaluation_tracker=evaluation_tracker,
-        model_config=model_config,
+        model=model,
     )
 
     pipeline.evaluate()
