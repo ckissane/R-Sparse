@@ -15,7 +15,8 @@
 # Tasks using acc_norm (length-normalized accuracy): hellaswag, arc:challenge, arc:easy, openbookqa, piqa, winogrande
 # MMLU uses standard accuracy
 # TASKS="leaderboard|mmlu|5|0,
-TASKS="leaderboard|winogrande|5|0,leaderboard|arc:challenge|25|0,lighteval|arc:easy|25|0,leaderboard|hellaswag|10|0,lighteval|openbookqa|0|0,lighteval|piqa|0|0"
+# TASKS="leaderboard|winogrande|5|0,leaderboard|arc:challenge|25|0,lighteval|arc:easy|25|0,leaderboard|hellaswag|10|0,lighteval|openbookqa|0|0,lighteval|piqa|0|0"
+TASKS="leaderboard|winogrande|5|0,leaderboard|arc:challenge|25|0,lighteval|arc:easy|25|0,leaderboard|hellaswag|10|0,lighteval|openbookqa|0|0"
 
 GPU=0
 model=unsloth/Llama-3.2-1B
