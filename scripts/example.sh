@@ -6,9 +6,9 @@
 # pip install lighteval==0.10.0
 
 # Generate Low-Rank Weights (Offline)
-python -u utils/prepare_low_rank_weight.py \
-    --model_name unsloth/Llama-3.2-1B \
-    --output_dir ../low_rank_models/llama-3.2-1b
+# python -u utils/prepare_low_rank_weight.py \
+#     --model_name unsloth/Llama-3.2-1B \
+#     --output_dir ./low_rank_models/llama-3.2-1b
 
 # Task definitions for lighteval 0.10.0
 # Format: suite|task:subset|num_fewshot|truncate_fewshots
