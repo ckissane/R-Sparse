@@ -259,7 +259,7 @@ def main():
     # Configure pipeline parameters
     pipeline_params = PipelineParameters(
         launcher_type=ParallelismManager.CUSTOM,
-        override_batch_size=args.batch_size,
+        # override_batch_size=args.batch_size,
     )
 
     # Create and run the pipeline

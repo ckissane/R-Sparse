@@ -47,6 +47,7 @@ class R_Sparse_Linear(nn.Module):
         self.rank = None
         self.threshold = None
         self.sparse_ratio = None
+        # self.register_buffer('scale', torch.ones(1))
 
     def _getting_threshold(self, input):
         nelements = input.numel()
