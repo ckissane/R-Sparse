@@ -36,11 +36,11 @@ class R_Sparse_Linear(nn.Module):
         if bias:
             self.bias = nn.Parameter(torch.empty(out_features))
         else:
-            self.register_parameter('bias', None)
+            self.register_parameter("bias", None)
 
         self.reset_parameters()
 
-        self.prefill_ratio = 0.5
+        self.prefill_ratio = 1
         self.flag_getting_threshold = False
         self.target_sparsity = 0
 
@@ -53,43 +53,60 @@ class R_Sparse_Linear(nn.Module):
         nelements = input.numel()
 
         if self.sparse_ratio == 1:
-            threshold = torch.topk(input.abs().view(-1), int(nelements * self.target_sparsity), largest=False)[0][-1]
+            threshold = torch.topk(
+                input.abs().view(-1),
+                int(nelements * self.target_sparsity),
+                largest=False,
+            )[0][-1]
             estimated_sparsity = (input.abs() < threshold).float().mean().item()
         else:
             scale_input = input * self.scale.unsqueeze(0).unsqueeze(0)
-            threshold = torch.topk(scale_input.abs().view(-1), int(nelements * self.target_sparsity), largest=False)[0][-1]
+            threshold = torch.topk(
+                scale_input.abs().view(-1),
+                int(nelements * self.target_sparsity),
+                largest=False,
+            )[0][-1]
             estimated_sparsity = (scale_input.abs() < threshold).float().mean().item()
 
         output = F.linear(input, self.weight, self.bias)
         self.threshold = threshold.item()
-        print('Setting threshold: ', self.threshold, 'Estimated sparsity: ', estimated_sparsity, 'Target sparsity: ', self.target_sparsity)
+        print(
+            "Setting threshold: ",
+            self.threshold,
+            "Estimated sparsity: ",
+            estimated_sparsity,
+            "Target sparsity: ",
+            self.target_sparsity,
+        )
         self.flag_getting_threshold = False
         return output
 
     def _setting_mode(self):
         if self.channels is not None and self.rank is not None:
-            self.mode = 'r_sparse'
+            self.mode = "r_sparse"
         elif self.channels is not None:
-            self.mode = 'sparse'
+            self.mode = "sparse"
         elif self.rank is not None:
-            self.mode = 'low_rank'
+            self.mode = "low_rank"
         else:
-            self.mode = 'dense'
+            self.mode = "dense"
 
     def _load_low_rank_module(self, path):
         if os.path.exists(path):
-            usv = torch.load(path, map_location='cpu')
-            u = usv[0][:, :self.rank]
-            s = usv[1][:self.rank]
-            v = usv[2][:, :self.rank]
+            usv = torch.load(path, map_location="cpu")
+            u = usv[0][:, : self.rank]
+            s = usv[1][: self.rank]
+            v = usv[2][:, : self.rank]
             scale = usv[3]
-            self.register_buffer('U', u.to(self.weight.dtype).to(self.weight.device))
-            self.register_buffer('S', s.to(self.weight.dtype).to(self.weight.device))
-            self.register_buffer('V', v.to(self.weight.dtype).to(self.weight.device))
-            self.register_buffer('scale', scale.to(self.weight.dtype).to(self.weight.device))
+            self.register_buffer("U", u.to(self.weight.dtype).to(self.weight.device))
+            self.register_buffer("S", s.to(self.weight.dtype).to(self.weight.device))
+            self.register_buffer("V", v.to(self.weight.dtype).to(self.weight.device))
+            self.register_buffer(
+                "scale", scale.to(self.weight.dtype).to(self.weight.device)
+            )
 
         else:
-            print('Can not find SVD decomposition file')
+            print("Can not find SVD decomposition file")
 
     def reset_parameters(self):
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
@@ -105,18 +122,20 @@ class R_Sparse_Linear(nn.Module):
 
         num_tokens = input.size(1)
         if self.prefill_ratio == 1:
-            if num_tokens > 1: # prefilling stage
+            if num_tokens > 1:  # prefilling stage
                 output = F.linear(input, self.weight, self.bias)
             else:
-                if self.mode == 'dense':
+                if self.mode == "dense":
                     output = F.linear(input, self.weight, self.bias)
-                elif self.mode == 'sparse': # sparse forward
+                elif self.mode == "sparse":  # sparse forward
                     s_mask = input.abs().gt(self.threshold).to(input.dtype)
                     output = F.linear(input * s_mask, self.weight, self.bias)
-                elif self.mode == 'low_rank': # low rank forward
-                    output = input @ (self.V[:, :self.rank] @ torch.diag(self.S[:self.rank])) 
-                    output = low_rank_output @ self.U[:, :self.rank].T
-                elif self.mode == 'r_sparse': # R-Sparse forward
+                elif self.mode == "low_rank":  # low rank forward
+                    output = input @ (
+                        self.V[:, : self.rank] @ torch.diag(self.S[: self.rank])
+                    )
+                    output = low_rank_output @ self.U[:, : self.rank].T
+                elif self.mode == "r_sparse":  # R-Sparse forward
                     scale_input = input * self.scale.unsqueeze(0).unsqueeze(0)
                     s_mask = scale_input.abs().gt(self.threshold).to(input.dtype)
 
@@ -124,35 +143,37 @@ class R_Sparse_Linear(nn.Module):
                     sparse_output = F.linear(sparse_input, self.weight, self.bias)
 
                     low_rank_input = input * (1 - s_mask)
-                    low_rank_output = low_rank_input @ (self.V[:, :self.rank] @ torch.diag(self.S[:self.rank])) 
-                    low_rank_output = low_rank_output @ self.U[:, :self.rank].T
+                    low_rank_output = low_rank_input @ (
+                        self.V[:, : self.rank] @ torch.diag(self.S[: self.rank])
+                    )
+                    low_rank_output = low_rank_output @ self.U[:, : self.rank].T
 
                     output = sparse_output + low_rank_output
                 else:
                     raise NotImplementedError
 
         else:
-            assert num_tokens > 1
-
-            decoding_tokens = int(num_tokens * (1 - self.prefill_ratio))
+            decoding_tokens = 0  # int(num_tokens * (1 - self.prefill_ratio))
             input_prefill = input[:, :decoding_tokens, :]
             input_decoding = input[:, decoding_tokens:, :]
 
             output_prefill = F.linear(input_prefill, self.weight, self.bias)
 
-            if self.mode == 'dense':
+            if self.mode == "dense":
                 output_decoding = F.linear(input_decoding, self.weight, self.bias)
                 output = torch.cat([output_prefill, output_decoding], dim=1)
-            elif self.mode == 'sparse': # sparse forward
+            elif self.mode == "sparse":  # sparse forward
                 s_mask = input_decoding.abs().gt(self.threshold).to(input.dtype)
                 sparse_input = input_decoding * s_mask
                 sparse_output = F.linear(sparse_input, self.weight, self.bias)
                 output = torch.cat([output_prefill, sparse_output], dim=1)
-            elif self.mode == 'low_rank': # low rank forward
-                low_rank_output = input_decoding @ (self.V[:, :self.rank] @ torch.diag(self.S[:self.rank])) 
-                low_rank_output = low_rank_output @ self.U[:, :self.rank].T
+            elif self.mode == "low_rank":  # low rank forward
+                low_rank_output = input_decoding @ (
+                    self.V[:, : self.rank] @ torch.diag(self.S[: self.rank])
+                )
+                low_rank_output = low_rank_output @ self.U[:, : self.rank].T
                 output = torch.cat([output_prefill, low_rank_output], dim=1)
-            elif self.mode == 'r_sparse': # R-Sparse forward
+            elif self.mode == "r_sparse":  # R-Sparse forward
                 scale_input = input_decoding * self.scale.unsqueeze(0).unsqueeze(0)
                 s_mask = scale_input.abs().gt(self.threshold).to(input.dtype)
 
@@ -160,16 +181,18 @@ class R_Sparse_Linear(nn.Module):
                 sparse_output = F.linear(sparse_input, self.weight, self.bias)
 
                 low_rank_input = input_decoding * (1 - s_mask)
-                low_rank_output = low_rank_input @ (self.V[:, :self.rank] @ torch.diag(self.S[:self.rank])) 
-                low_rank_output = low_rank_output @ self.U[:, :self.rank].T
+                low_rank_output = low_rank_input @ (
+                    self.V[:, : self.rank] @ torch.diag(self.S[: self.rank])
+                )
+                low_rank_output = low_rank_output @ self.U[:, : self.rank].T
 
-                output = torch.cat([output_prefill, sparse_output + low_rank_output], dim=1)
+                output = torch.cat(
+                    [output_prefill, sparse_output + low_rank_output], dim=1
+                )
             else:
                 raise NotImplementedError
 
         return output
-
-
 
 
 class LlamaForCausalLM_R_Sparse(LlamaForCausalLM):
@@ -178,81 +201,92 @@ class LlamaForCausalLM_R_Sparse(LlamaForCausalLM):
         num_layers = len(self.model.layers)
         for layer_idx in range(num_layers):
             original_linear_layer = self.model.layers[layer_idx].mlp.gate_proj
-            gate_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            gate_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             gate_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].mlp.gate_proj = gate_proj
 
             original_linear_layer = self.model.layers[layer_idx].mlp.up_proj
-            up_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            up_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             up_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].mlp.up_proj = up_proj
 
             original_linear_layer = self.model.layers[layer_idx].mlp.down_proj
-            down_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            down_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             down_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].mlp.down_proj = down_proj
 
             original_linear_layer = self.model.layers[layer_idx].self_attn.q_proj
-            q_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            q_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             q_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].self_attn.q_proj = q_proj
 
             original_linear_layer = self.model.layers[layer_idx].self_attn.k_proj
-            k_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            k_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             k_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].self_attn.k_proj = k_proj
 
             original_linear_layer = self.model.layers[layer_idx].self_attn.v_proj
-            v_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            v_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             v_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].self_attn.v_proj = v_proj
 
             original_linear_layer = self.model.layers[layer_idx].self_attn.o_proj
-            o_proj = R_Sparse_Linear(original_linear_layer.in_features, original_linear_layer.out_features, bias=False)
+            o_proj = R_Sparse_Linear(
+                original_linear_layer.in_features,
+                original_linear_layer.out_features,
+                bias=False,
+            )
             o_proj.weight.data = original_linear_layer.weight.data
             self.model.layers[layer_idx].self_attn.o_proj = o_proj
 
     def _load_low_rank_module(self, config):
         num_layers = len(self.model.layers)
         for layer_idx in tqdm.tqdm(range(num_layers)):
-            self.model.layers[layer_idx].mlp.gate_proj._load_low_rank_module(config.gate_svd_path[layer_idx])
-            self.model.layers[layer_idx].mlp.up_proj._load_low_rank_module(config.up_svd_path[layer_idx])
-            self.model.layers[layer_idx].mlp.down_proj._load_low_rank_module(config.down_svd_path[layer_idx])
-            self.model.layers[layer_idx].self_attn.q_proj._load_low_rank_module(config.q_svd_path[layer_idx])
-            self.model.layers[layer_idx].self_attn.k_proj._load_low_rank_module(config.k_svd_path[layer_idx])
-            self.model.layers[layer_idx].self_attn.v_proj._load_low_rank_module(config.v_svd_path[layer_idx])
-            self.model.layers[layer_idx].self_attn.o_proj._load_low_rank_module(config.o_svd_path[layer_idx])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            self.model.layers[layer_idx].mlp.gate_proj._load_low_rank_module(
+                config.gate_svd_path[layer_idx]
+            )
+            self.model.layers[layer_idx].mlp.up_proj._load_low_rank_module(
+                config.up_svd_path[layer_idx]
+            )
+            self.model.layers[layer_idx].mlp.down_proj._load_low_rank_module(
+                config.down_svd_path[layer_idx]
+            )
+            self.model.layers[layer_idx].self_attn.q_proj._load_low_rank_module(
+                config.q_svd_path[layer_idx]
+            )
+            self.model.layers[layer_idx].self_attn.k_proj._load_low_rank_module(
+                config.k_svd_path[layer_idx]
+            )
+            self.model.layers[layer_idx].self_attn.v_proj._load_low_rank_module(
+                config.v_svd_path[layer_idx]
+            )
+            self.model.layers[layer_idx].self_attn.o_proj._load_low_rank_module(
+                config.o_svd_path[layer_idx]
+            )
 
 
 class LlamaAttention(nn.Module):
@@ -279,9 +313,7 @@ class LlamaAttention(nn.Module):
         self.rope_theta = config.rope_theta
         self.is_causal = True
 
-
-
-        self.prefill_ratio = 0.5
+        self.prefill_ratio = 1
 
         self.flag_getting_threshold = True
         self.target_sparsity = 0.5
@@ -289,9 +321,7 @@ class LlamaAttention(nn.Module):
         self.rank = 0
         self.threshold = None
         self.sparse_ratio = 1
-        self.mode = 'sparse'
-
-
+        self.mode = "sparse"
 
         if (self.head_dim * self.num_heads) != self.hidden_size:
             raise ValueError(
@@ -299,10 +329,22 @@ class LlamaAttention(nn.Module):
                 f" and `num_heads`: {self.num_heads})."
             )
 
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
-        self.o_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=config.attention_bias)
+        self.q_proj = nn.Linear(
+            self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias
+        )
+        self.k_proj = nn.Linear(
+            self.hidden_size,
+            self.num_key_value_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.v_proj = nn.Linear(
+            self.hidden_size,
+            self.num_key_value_heads * self.head_dim,
+            bias=config.attention_bias,
+        )
+        self.o_proj = nn.Linear(
+            self.hidden_size, self.hidden_size, bias=config.attention_bias
+        )
         self._init_rope()
 
     def _init_rope(self):
@@ -340,32 +382,50 @@ class LlamaAttention(nn.Module):
         # else:
         #     # sparsity
 
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        query_states = query_states.view(
+            bsz, q_len, self.num_heads, self.head_dim
+        ).transpose(1, 2)
+        key_states = key_states.view(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
+        value_states = value_states.view(
+            bsz, q_len, self.num_key_value_heads, self.head_dim
+        ).transpose(1, 2)
 
         past_key_value = getattr(self, "past_key_value", past_key_value)
         cos, sin = self.rotary_emb(value_states, position_ids)
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
+        query_states, key_states = apply_rotary_pos_emb(
+            query_states, key_states, cos, sin
+        )
 
         if past_key_value is not None:
             # sin and cos are specific to RoPE models; position_ids needed for the static cache
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+            key_states, value_states = past_key_value.update(
+                key_states, value_states, self.layer_idx, cache_kwargs
+            )
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+        attn_weights = torch.matmul(
+            query_states, key_states.transpose(2, 3)
+        ) / math.sqrt(self.head_dim)
 
         if attention_mask is not None:  # no matter the length, we just slice it
             if cache_position is not None:
-                causal_mask = attention_mask[:, :, cache_position, : key_states.shape[-2]]
+                causal_mask = attention_mask[
+                    :, :, cache_position, : key_states.shape[-2]
+                ]
             attn_weights = attn_weights + causal_mask
 
         # upcast attention to fp32
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_weights = nn.functional.dropout(attn_weights, p=self.attention_dropout, training=self.training)
+        attn_weights = nn.functional.softmax(
+            attn_weights, dim=-1, dtype=torch.float32
+        ).to(query_states.dtype)
+        attn_weights = nn.functional.dropout(
+            attn_weights, p=self.attention_dropout, training=self.training
+        )
         attn_output = torch.matmul(attn_weights, value_states)
 
         if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
@@ -384,24 +444,3 @@ class LlamaAttention(nn.Module):
             attn_weights = None
 
         return attn_output, attn_weights, past_key_value
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

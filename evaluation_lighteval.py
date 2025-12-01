@@ -29,7 +29,7 @@ class RSparseModel(LightevalModel):
         self._cache_dir = config.get("cache_dir", None)
         self._device = config.get("device", "cuda:0")
         self._target_sparsity = config.get("target_sparsity", 0.5)
-        self._prefill_ratio = config.get("prefill_ratio", 0.1)
+        self._prefill_ratio = config.get("prefill_ratio", 1)
         self._sparse_ratio = config.get("sparse_ratio", 1.0)
 
         # Create a ModelConfig for lighteval pipeline
