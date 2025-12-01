@@ -9,7 +9,7 @@ from typing import Optional, List, Union
 import torch
 from transformers import AutoTokenizer, AutoConfig
 
-from lighteval.models.abstract_model import LightevalModel
+from lighteval.models.abstract_model import LightevalModel, ModelInfo
 from lighteval.models.model_output import (
     GenerativeResponse,
     LoglikelihoodResponse,
@@ -59,7 +59,16 @@ class RSparseModel(LightevalModel):
     @property
     def tokenizer(self):
         return self._tokenizer
-
+    @property
+    def model_info(self):
+        return ModelInfo(
+            model_name=self._model_name,
+            model_sha="",
+            model_dtype=str(self._model.dtype)
+            if hasattr(self._model, "dtype")
+            else "float16",
+            model_size="",
+        )
     @property
     def model(self):
         return self._model

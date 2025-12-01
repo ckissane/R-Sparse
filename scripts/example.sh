@@ -18,9 +18,10 @@
 # Format: suite|task:subset|num_fewshot
 # Tasks using acc_norm (length-normalized accuracy): hellaswag, arc:challenge, arc:easy, openbookqa, piqa, winogrande
 # MMLU uses standard accuracy
-TASKS="lighteval|mmlu|0,lighteval|winogrande|0,lighteval|arc:challenge|0,lighteval|arc:easy|0,lighteval|hellaswag|0,lighteval|openbookqa|0,lighteval|piqa|0"
+# TASKS="leaderboard|mmlu|5|0,leaderboard|winogrande|5|0,leaderboard|arc:challenge|25|0,lighteval|arc:easy|25|0,leaderboard|hellaswag|10|0,lighteval|openbookqa|0|0,lighteval|piqa|0|0"
+# TASKS="leaderboard|mmlu|0|0,leaderboard|winogrande|0|0,leaderboard|arc:challenge|0|0,lighteval|arc:easy|0|0,leaderboard|hellaswag|0|0,lighteval|openbookqa|0|0,lighteval|piqa|0|0"
 
-# TASKS="lighteval|arc:easy|0"
+TASKS="leaderboard|hellaswag|0|0"
 GPU=0
 model=unsloth/Llama-3.2-1B
 
@@ -29,7 +30,7 @@ CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation_lighteval.py \
     --model_name ${model} \
     --method full \
     --tasks "${TASKS}" \
-    --output_dir "./evals/full"
+    --output_dir "./evals_1b/full"
 
 # # Baseline: Relufiction
 # CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation_lighteval.py \
@@ -52,9 +53,8 @@ CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation_lighteval.py \
     --method r_sparse \
     --config_file config/llama-3.2-1b_default.json \
     --tasks "${TASKS}" \
-    --output_dir "./evals/r_sparse_3" \
+    --output_dir "./evals_1b/r_sparse_3" \
     --target_sparsity=0.66666666666
-
 #CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation_lighteval.py \
     # --model_name ${model} \
     # --method r_sparse \
@@ -74,7 +74,7 @@ CUDA_VISIBLE_DEVICES=${GPU} python -u evaluation_lighteval.py \
     --method r_sparse \
     --config_file config/llama-3.2-1b_default.json \
     --tasks "${TASKS}" \
-    --output_dir "./evals/r_sparse_6" \
+    --output_dir "./evals_1b/r_sparse_6" \
     --target_sparsity=0.83333333
 
     # --sparse_config_file config/llama3_sparsity_50_evolutionary_search.npy \
