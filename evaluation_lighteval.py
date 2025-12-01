@@ -1,5 +1,5 @@
 """
-Custom model wrapper for R-Sparse evaluation with lighteval 0.10.0
+Custom model wrapper for R-Sparse evaluation with lighteval 0.13.0
 """
 
 import argparse
@@ -117,7 +117,14 @@ class RSparseModel(LightevalModel):
                             : generated_text.index(stop_seq)
                         ]
 
-            results.append(ModelResponse(generated_text=generated_text))
+            generated_tokens = outputs[0][input_ids.shape[1] :].tolist()
+            results.append(
+                ModelResponse(
+                    text=[generated_text],
+                    input_tokens=input_ids[0].tolist(),
+                    output_tokens=[generated_tokens],
+                )
+            )
 
         return results
 
@@ -156,9 +163,10 @@ class RSparseModel(LightevalModel):
 
             results.append(
                 ModelResponse(
-                    result=(total_log_prob, is_greedy),
+                    logprobs=[total_log_prob],
+                    argmax_logits_eq_gold=[is_greedy],
                     input_tokens=context_ids,
-                    generated_tokens=continuation_ids,
+                    output_tokens=[continuation_ids],
                 )
             )
 
@@ -184,14 +192,14 @@ class RSparseModel(LightevalModel):
             log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
             token_log_probs = log_probs[range(len(shift_labels)), shift_labels]
 
-            total_log_prob = token_log_probs.sum().item()
+            token_log_probs_list = token_log_probs.tolist()
             input_tokens = input_ids[0].tolist()
 
             results.append(
                 ModelResponse(
-                    result=(total_log_prob, False),
+                    logprobs=token_log_probs_list,
                     input_tokens=input_tokens,
-                    generated_tokens=input_tokens[1:],
+                    output_tokens=[[t] for t in input_tokens[1:]],
                 )
             )
 
@@ -222,16 +230,23 @@ class RSparseModel(LightevalModel):
                 choice_id = self._tokenizer.encode(choice, add_special_tokens=False)
                 if len(choice_id) > 0:
                     choice_log_probs.append(log_probs[choice_id[0]].item())
-                    choice_token_ids.append(choice_id[0])
+                    choice_token_ids.append([choice_id[0]])
                 else:
                     choice_log_probs.append(float("-inf"))
-                    choice_token_ids.append(-1)
+                    choice_token_ids.append([])
+
+            # Determine if the argmax matches each choice
+            argmax_token = last_logits.argmax().item()
+            argmax_eq_gold = [
+                len(cid) > 0 and cid[0] == argmax_token for cid in choice_token_ids
+            ]
 
             results.append(
                 ModelResponse(
-                    result=choice_log_probs,
+                    logprobs=choice_log_probs,
+                    argmax_logits_eq_gold=argmax_eq_gold,
                     input_tokens=input_ids[0].tolist(),
-                    generated_tokens=choice_token_ids,
+                    output_tokens=choice_token_ids,
                 )
             )
 
