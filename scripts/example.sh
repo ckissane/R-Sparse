@@ -7,9 +7,9 @@
 # ==0.10.0 # -E extended_tasks
 
 # Generate Low-Rank Weights (Offline)
-#  python -u utils/prepare_low_rank_weight.py \
-#      --model_name unsloth/Llama-3.2-1B \
-#      --output_dir ../low_rank_models/llama-3.2-1b
+ python -u utils/prepare_low_rank_weight.py \
+     --model_name unsloth/Llama-3.2-1B \
+     --output_dir ../low_rank_models/llama-3.2-1b
 #  python -u utils/prepare_low_rank_weight.py \
 #      --model_name unsloth/Llama-3.2-3B \
 #      --output_dir ../low_rank_models/llama-3.2-3b
@@ -18,7 +18,7 @@
 # Format: suite|task:subset|num_fewshot
 # Tasks using acc_norm (length-normalized accuracy): hellaswag, arc:challenge, arc:easy, openbookqa, piqa, winogrande
 # MMLU uses standard accuracy
-TASKS="lighteval|mmlu|0,lighteval|winogrande|0,lighteval|arc:challenge|0,lighteval|arc:easy|0,lighteval|hellaswag|0,lighteval|openbookqa|0" # ,lighteval|piqa|0"
+TASKS="lighteval|mmlu|0,lighteval|winogrande|0,lighteval|arc:challenge|0,lighteval|arc:easy|0,lighteval|hellaswag|0,lighteval|openbookqa|0,lighteval|piqa|0"
 
 # TASKS="lighteval|arc:easy|0"
 GPU=0

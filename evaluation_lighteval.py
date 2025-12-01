@@ -1,5 +1,5 @@
 """
-Custom model wrapper for R-Sparse evaluation with lighteval 0.12.0
+Custom model wrapper for R-Sparse evaluation with lighteval 0.10.0
 """
 
 import argparse
@@ -9,11 +9,14 @@ from typing import Optional, List, Union
 import torch
 from transformers import AutoTokenizer, AutoConfig
 
-from lighteval.models.abstract_model import LightevalModel, ModelConfig
-from lighteval.models.model_output import ModelResponse
+from lighteval.models.abstract_model import LightevalModel
+from lighteval.models.model_output import (
+    GenerativeResponse,
+    LoglikelihoodResponse,
+    LoglikelihoodSingleTokenResponse,
+)
 from lighteval.logging.evaluation_tracker import EvaluationTracker
 from lighteval.pipeline import Pipeline, PipelineParameters, ParallelismManager
-from lighteval.utils.cache_management import SampleCache
 
 from utils.setup import setup_model, setup_config
 
@@ -29,11 +32,8 @@ class RSparseModel(LightevalModel):
         self._cache_dir = config.get("cache_dir", None)
         self._device = config.get("device", "cuda:0")
         self._target_sparsity = config.get("target_sparsity", 0.5)
-        self._prefill_ratio = config.get("prefill_ratio", 1)
+        self._prefill_ratio = config.get("prefill_ratio", 0.1)
         self._sparse_ratio = config.get("sparse_ratio", 1.0)
-
-        # Create a ModelConfig for lighteval pipeline
-        self.config = ModelConfig(model_name=self._model_name)
 
         # Create args object for setup_model
         args = argparse.Namespace(
@@ -56,9 +56,6 @@ class RSparseModel(LightevalModel):
         if self._tokenizer.pad_token is None:
             self._tokenizer.pad_token = self._tokenizer.eos_token
 
-        # Initialize cache for lighteval pipeline
-        self._cache = SampleCache(self.config)
-
     @property
     def tokenizer(self):
         return self._tokenizer
@@ -79,17 +76,35 @@ class RSparseModel(LightevalModel):
     def max_length(self):
         return self._model.config.max_position_embeddings
 
-    def greedy_until(self, docs, override_bs=None):
-        """Generate text until stop sequence or max tokens."""
-        results = []
-        for doc in docs:
-            context = doc.query
-            stop_sequences = doc.stop_sequences
-            max_tokens = doc.generation_size or 256
+    def greedy_until(self, requests, override_bs=None):
+        """Generate text until stop sequence or max tokens.
 
-            inputs = self._tokenizer(context, return_tensors="pt", padding=True)
-            input_ids = inputs["input_ids"].to(self._device)
-            attention_mask = inputs["attention_mask"].to(self._device)
+        Returns list of GenerativeResponse objects.
+        """
+        results = []
+        for request in requests:
+            # v0.10.0 uses request objects with tokenized_context
+            if hasattr(request, "tokenized_context"):
+                input_ids = torch.tensor(
+                    [request.tokenized_context], device=self._device
+                )
+            else:
+                context = (
+                    request.context if hasattr(request, "context") else str(request)
+                )
+                input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
+                    self._device
+                )
+
+            stop_sequences = (
+                request.stop_sequence if hasattr(request, "stop_sequence") else None
+            )
+            max_tokens = (
+                request.generation_size if hasattr(request, "generation_size") else 256
+            )
+            max_tokens = max_tokens or 256
+
+            attention_mask = torch.ones_like(input_ids)
 
             with torch.no_grad():
                 outputs = self._model.generate(
@@ -107,6 +122,8 @@ class RSparseModel(LightevalModel):
 
             # Apply stop sequences
             if stop_sequences:
+                if isinstance(stop_sequences, str):
+                    stop_sequences = [stop_sequences]
                 for stop_seq in stop_sequences:
                     if stop_seq in generated_text:
                         generated_text = generated_text[
@@ -114,75 +131,89 @@ class RSparseModel(LightevalModel):
                         ]
 
             generated_tokens = outputs[0][input_ids.shape[1] :].tolist()
+
             results.append(
-                ModelResponse(
-                    text=[generated_text],
+                GenerativeResponse(
+                    result=generated_text,
                     input_tokens=input_ids[0].tolist(),
-                    output_tokens=[generated_tokens],
+                    generated_tokens=generated_tokens,
                 )
             )
 
         return results
 
-    def loglikelihood(self, docs, override_bs=None):
-        """Compute log probabilities of continuations."""
-        results = []
-        for doc in docs:
-            context = doc.query
-            # For loglikelihood, we compute for each choice
-            choices = doc.choices if doc.choices else [""]
+    def loglikelihood(self, requests, override_bs=None):
+        """Compute log probabilities of continuations.
 
-            doc_results = []
-            for continuation in choices:
-                # Tokenize context and continuation
+        Returns list of LoglikelihoodResponse objects.
+        Each response contains (logprob, is_greedy) tuple.
+        """
+        results = []
+        for request in requests:
+            # v0.10.0 provides tokenized context and continuation
+            if hasattr(request, "tokenized_context") and hasattr(
+                request, "tokenized_continuation"
+            ):
+                context_ids = request.tokenized_context
+                continuation_ids = request.tokenized_continuation
+            else:
+                context = (
+                    request.context if hasattr(request, "context") else str(request)
+                )
+                continuation = request.choice if hasattr(request, "choice") else ""
                 context_ids = self._tokenizer.encode(context, add_special_tokens=False)
                 continuation_ids = self._tokenizer.encode(
                     continuation, add_special_tokens=False
                 )
-                full_ids = context_ids + continuation_ids
 
-                input_ids = torch.tensor([full_ids], device=self._device)
+            full_ids = context_ids + continuation_ids
+            input_ids = torch.tensor([full_ids], device=self._device)
 
-                with torch.no_grad():
-                    outputs = self._model(input_ids=input_ids)
-                    logits = outputs.logits
+            with torch.no_grad():
+                outputs = self._model(input_ids=input_ids)
+                logits = outputs.logits
 
-                # Get log probs for continuation tokens
-                shift_logits = logits[0, len(context_ids) - 1 : -1, :]
-                shift_labels = torch.tensor(continuation_ids, device=self._device)
+            # Get log probs for continuation tokens
+            shift_logits = logits[0, len(context_ids) - 1 : -1, :]
+            shift_labels = torch.tensor(continuation_ids, device=self._device)
 
-                log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
-                token_log_probs = log_probs[range(len(continuation_ids)), shift_labels]
+            log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
+            token_log_probs = log_probs[range(len(continuation_ids)), shift_labels]
 
-                total_log_prob = token_log_probs.sum().item()
-                is_greedy = all(
-                    shift_logits[i].argmax().item() == shift_labels[i].item()
-                    for i in range(len(continuation_ids))
-                )
+            total_log_prob = token_log_probs.sum().item()
+            is_greedy = all(
+                shift_logits[i].argmax().item() == shift_labels[i].item()
+                for i in range(len(continuation_ids))
+            )
 
-                doc_results.append((total_log_prob, is_greedy, continuation_ids))
-
-            # Return results for all choices
             results.append(
-                ModelResponse(
-                    logprobs=[r[0] for r in doc_results],
-                    argmax_logits_eq_gold=[r[1] for r in doc_results],
+                LoglikelihoodResponse(
+                    result=(total_log_prob, is_greedy),
                     input_tokens=context_ids,
-                    output_tokens=[r[2] for r in doc_results],
+                    generated_tokens=continuation_ids,
                 )
             )
 
         return results
 
-    def loglikelihood_rolling(self, docs, override_bs=None):
-        """Compute rolling log probabilities."""
-        results = []
-        for doc in docs:
-            context = doc.query
+    def loglikelihood_rolling(self, requests, override_bs=None):
+        """Compute rolling log probabilities for perplexity.
 
-            input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
-                self._device
-            )
+        Returns list of LoglikelihoodResponse objects.
+        """
+        results = []
+        for request in requests:
+            if hasattr(request, "tokenized_context"):
+                input_ids = torch.tensor(
+                    [request.tokenized_context], device=self._device
+                )
+            else:
+                context = (
+                    request.context if hasattr(request, "context") else str(request)
+                )
+                input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
+                    self._device
+                )
 
             with torch.no_grad():
                 outputs = self._model(input_ids=input_ids)
@@ -194,29 +225,40 @@ class RSparseModel(LightevalModel):
             log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
             token_log_probs = log_probs[range(len(shift_labels)), shift_labels]
 
-            token_log_probs_list = token_log_probs.tolist()
+            total_log_prob = token_log_probs.sum().item()
             input_tokens = input_ids[0].tolist()
 
             results.append(
-                ModelResponse(
-                    logprobs=token_log_probs_list,
+                LoglikelihoodResponse(
+                    result=(total_log_prob, False),
                     input_tokens=input_tokens,
-                    output_tokens=[[t] for t in input_tokens[1:]],
+                    generated_tokens=input_tokens[1:],
                 )
             )
 
         return results
 
-    def loglikelihood_single_token(self, docs, override_bs=None):
-        """Compute log probabilities for single token predictions."""
-        results = []
-        for doc in docs:
-            context = doc.query
-            choices = doc.choices  # List of single tokens
+    def loglikelihood_single_token(self, requests, override_bs=None):
+        """Compute log probabilities for single token predictions.
 
-            input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
-                self._device
-            )
+        Returns list of LoglikelihoodSingleTokenResponse objects.
+        Each response contains list of log probs for each choice.
+        """
+        results = []
+        for request in requests:
+            if hasattr(request, "tokenized_context"):
+                input_ids = torch.tensor(
+                    [request.tokenized_context], device=self._device
+                )
+            else:
+                context = (
+                    request.context if hasattr(request, "context") else str(request)
+                )
+                input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
+                    self._device
+                )
+
+            choices = request.choices if hasattr(request, "choices") else []
 
             with torch.no_grad():
                 outputs = self._model(input_ids=input_ids)
@@ -227,28 +269,25 @@ class RSparseModel(LightevalModel):
             log_probs = torch.nn.functional.log_softmax(last_logits, dim=-1)
 
             choice_log_probs = []
-            choice_token_ids = []
             for choice in choices:
-                choice_id = self._tokenizer.encode(choice, add_special_tokens=False)
+                if (
+                    hasattr(request, "tokenized_continuation")
+                    and request.tokenized_continuation
+                ):
+                    choice_id = request.tokenized_continuation
+                else:
+                    choice_id = self._tokenizer.encode(choice, add_special_tokens=False)
+
                 if len(choice_id) > 0:
                     choice_log_probs.append(log_probs[choice_id[0]].item())
-                    choice_token_ids.append([choice_id[0]])
                 else:
                     choice_log_probs.append(float("-inf"))
-                    choice_token_ids.append([])
-
-            # Determine if the argmax matches each choice
-            argmax_token = last_logits.argmax().item()
-            argmax_eq_gold = [
-                len(cid) > 0 and cid[0] == argmax_token for cid in choice_token_ids
-            ]
 
             results.append(
-                ModelResponse(
-                    logprobs=choice_log_probs,
-                    argmax_logits_eq_gold=argmax_eq_gold,
+                LoglikelihoodSingleTokenResponse(
+                    result=choice_log_probs,
                     input_tokens=input_ids[0].tolist(),
-                    output_tokens=choice_token_ids,
+                    generated_tokens=[],
                 )
             )
 
@@ -276,8 +315,8 @@ def parse_args():
     parser.add_argument("--sparse_config_file", type=str, default=None)
 
     # Evaluation setup
-    # Task format: suite|task|num_few_shot
-    parser.add_argument("--tasks", type=str, default="leaderboard|mmlu|0")
+    # Task format for v0.10.0: suite|task|num_few_shot|truncate_flag
+    parser.add_argument("--tasks", type=str, default="lighteval|arc:easy|0|0")
     parser.add_argument("--output_dir", type=str, default="./evals")
     parser.add_argument("--batch_size", type=int, default=1)
 
@@ -310,7 +349,6 @@ def main():
     # Configure pipeline parameters
     pipeline_params = PipelineParameters(
         launcher_type=ParallelismManager.CUSTOM,
-        # override_batch_size=args.batch_size,
     )
 
     # Create and run the pipeline
