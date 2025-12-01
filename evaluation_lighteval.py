@@ -156,10 +156,9 @@ class RSparseModel(LightevalModel):
 
             results.append(
                 ModelResponse(
-                    logprobs=[total_log_prob],
-                    argmax_logits_eq_gold=[is_greedy],
+                    result=(total_log_prob, is_greedy),
                     input_tokens=context_ids,
-                    output_tokens=[continuation_ids],
+                    generated_tokens=continuation_ids,
                 )
             )
 
@@ -185,14 +184,14 @@ class RSparseModel(LightevalModel):
             log_probs = torch.nn.functional.log_softmax(shift_logits, dim=-1)
             token_log_probs = log_probs[range(len(shift_labels)), shift_labels]
 
-            token_log_probs_list = token_log_probs.tolist()
+            total_log_prob = token_log_probs.sum().item()
             input_tokens = input_ids[0].tolist()
 
             results.append(
                 ModelResponse(
-                    logprobs=token_log_probs_list,
+                    result=(total_log_prob, False),
                     input_tokens=input_tokens,
-                    output_tokens=[[t] for t in input_tokens[1:]],
+                    generated_tokens=input_tokens[1:],
                 )
             )
 
@@ -223,23 +222,16 @@ class RSparseModel(LightevalModel):
                 choice_id = self._tokenizer.encode(choice, add_special_tokens=False)
                 if len(choice_id) > 0:
                     choice_log_probs.append(log_probs[choice_id[0]].item())
-                    choice_token_ids.append([choice_id[0]])
+                    choice_token_ids.append(choice_id[0])
                 else:
                     choice_log_probs.append(float("-inf"))
-                    choice_token_ids.append([])
-
-            # Determine if the argmax matches each choice
-            argmax_token = last_logits.argmax().item()
-            argmax_eq_gold = [
-                len(cid) > 0 and cid[0] == argmax_token for cid in choice_token_ids
-            ]
+                    choice_token_ids.append(-1)
 
             results.append(
                 ModelResponse(
-                    logprobs=choice_log_probs,
-                    argmax_logits_eq_gold=argmax_eq_gold,
+                    result=choice_log_probs,
                     input_tokens=input_ids[0].tolist(),
-                    output_tokens=choice_token_ids,
+                    generated_tokens=choice_token_ids,
                 )
             )
 
