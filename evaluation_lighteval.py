@@ -59,6 +59,7 @@ class RSparseModel(LightevalModel):
     @property
     def tokenizer(self):
         return self._tokenizer
+
     @property
     def model_info(self):
         return ModelInfo(
@@ -69,6 +70,7 @@ class RSparseModel(LightevalModel):
             else "float16",
             model_size="",
         )
+
     @property
     def model(self):
         return self._model
@@ -93,25 +95,17 @@ class RSparseModel(LightevalModel):
         results = []
         for request in requests:
             # v0.10.0 uses request objects with tokenized_context
-            if hasattr(request, "tokenized_context"):
-                input_ids = torch.tensor(
-                    [request.tokenized_context], device=self._device
-                )
+            tokenized_context = getattr(request, "tokenized_context", None)
+            if tokenized_context is not None:
+                input_ids = torch.tensor([list(tokenized_context)], device=self._device)
             else:
-                context = (
-                    request.context if hasattr(request, "context") else str(request)
-                )
+                context = getattr(request, "context", "") or ""
                 input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
                     self._device
                 )
 
-            stop_sequences = (
-                request.stop_sequence if hasattr(request, "stop_sequence") else None
-            )
-            max_tokens = (
-                request.generation_size if hasattr(request, "generation_size") else 256
-            )
-            max_tokens = max_tokens or 256
+            stop_sequences = getattr(request, "stop_sequence", None)
+            max_tokens = getattr(request, "generation_size", 256) or 256
 
             attention_mask = torch.ones_like(input_ids)
 
@@ -160,17 +154,20 @@ class RSparseModel(LightevalModel):
         results = []
         for request in requests:
             # v0.10.0 provides tokenized context and continuation
-            if hasattr(request, "tokenized_context") and hasattr(
-                request, "tokenized_continuation"
-            ):
-                context_ids = request.tokenized_context
-                continuation_ids = request.tokenized_continuation
+            context_ids = getattr(request, "tokenized_context", None)
+            continuation_ids = getattr(request, "tokenized_continuation", None)
+
+            # Convert to list if not None
+            if context_ids is not None:
+                context_ids = list(context_ids)
             else:
-                context = (
-                    request.context if hasattr(request, "context") else str(request)
-                )
-                continuation = request.choice if hasattr(request, "choice") else ""
+                context = getattr(request, "context", "") or ""
                 context_ids = self._tokenizer.encode(context, add_special_tokens=False)
+
+            if continuation_ids is not None:
+                continuation_ids = list(continuation_ids)
+            else:
+                continuation = getattr(request, "choice", "") or ""
                 continuation_ids = self._tokenizer.encode(
                     continuation, add_special_tokens=False
                 )
@@ -212,14 +209,11 @@ class RSparseModel(LightevalModel):
         """
         results = []
         for request in requests:
-            if hasattr(request, "tokenized_context"):
-                input_ids = torch.tensor(
-                    [request.tokenized_context], device=self._device
-                )
+            tokenized_context = getattr(request, "tokenized_context", None)
+            if tokenized_context is not None:
+                input_ids = torch.tensor([list(tokenized_context)], device=self._device)
             else:
-                context = (
-                    request.context if hasattr(request, "context") else str(request)
-                )
+                context = getattr(request, "context", "") or ""
                 input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
                     self._device
                 )
@@ -255,19 +249,16 @@ class RSparseModel(LightevalModel):
         """
         results = []
         for request in requests:
-            if hasattr(request, "tokenized_context"):
-                input_ids = torch.tensor(
-                    [request.tokenized_context], device=self._device
-                )
+            tokenized_context = getattr(request, "tokenized_context", None)
+            if tokenized_context is not None:
+                input_ids = torch.tensor([list(tokenized_context)], device=self._device)
             else:
-                context = (
-                    request.context if hasattr(request, "context") else str(request)
-                )
+                context = getattr(request, "context", "") or ""
                 input_ids = self._tokenizer.encode(context, return_tensors="pt").to(
                     self._device
                 )
 
-            choices = request.choices if hasattr(request, "choices") else []
+            choices = getattr(request, "choices", []) or []
 
             with torch.no_grad():
                 outputs = self._model(input_ids=input_ids)
